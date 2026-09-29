@@ -28,3 +28,6 @@ airflow.db
 .DS_Store
 .vscode/
 .idea/
+
+# Local-only, not for GitHub
+INTERVIEW_PREP_README.md
