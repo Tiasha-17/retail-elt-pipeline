@@ -1,0 +1,30 @@
+# Landing zone / seed data — regenerate with data/partition_landing_zone.py
+data/landing/
+data/seed/
+data/warehouse/
+*.duckdb
+*.duckdb.wal
+
+# dbt
+dbt/retail_elt/target/
+dbt/retail_elt/dbt_packages/
+dbt/retail_elt/logs/
+dbt/profiles/.user.yml
+retail_ci.duckdb
+tests/idempotency_check.duckdb
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Airflow
+logs/
+airflow.cfg
+airflow.db
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

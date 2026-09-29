@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dbt-build:
+    runs-on: ubuntu-latest
+    env:
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt/profiles
+      DUCKDB_PATH: ${{ github.workspace }}/retail_ci.duckdb
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prove idempotency on the fixture landing zone
+        run: python tests/test_idempotency.py
+
+      - name: Load fixture landing zone into raw tables
+        run: |
+          for table in orders order_items payments reviews seed; do
+            python scripts/load_raw.py \
+              --warehouse "$DUCKDB_PATH" \
+              --landing tests/fixtures/landing \
+              --seed tests/fixtures/seed \
+              --table "$table"
+          done
+
+      - name: dbt build (staging + marts + tests)
+        working-directory: dbt/retail_elt
+        run: dbt build --target ci
+
+      - name: dbt docs generate
+        working-directory: dbt/retail_elt
+        run: dbt docs generate --target ci
+
+      - name: Upload dbt docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-docs
+          path: dbt/retail_elt/target/

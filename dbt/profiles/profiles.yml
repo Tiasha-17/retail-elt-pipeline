@@ -1,0 +1,11 @@
+retail_elt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '/data/warehouse/retail.duckdb') }}"
+      threads: 4
+    ci:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', 'retail_ci.duckdb') }}"
+      threads: 2
