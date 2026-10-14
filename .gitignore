@@ -2,6 +2,7 @@
 data/landing/
 data/seed/
 data/warehouse/
+data/dashboard_exports/
 *.duckdb
 *.duckdb.wal
 
