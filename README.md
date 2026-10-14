@@ -1,8 +1,16 @@
-# Retail ELT Pipeline
+# Retail ELT and Partner Performance Analytics
 
-A small but real ELT pipeline — simulated monthly landing zone → Airflow
-orchestration → dbt transformations with tests → a queryable DuckDB
-warehouse — running entirely locally with `docker compose up`.
+An end-to-end retail data product: simulated monthly landing zone -> Airflow
+orchestration -> dbt transformations and quality gates -> a partner-performance
+analytics layer in DuckDB. It runs locally with `docker compose up`.
+
+The engineering layer proves that the warehouse can be rebuilt reliably. The
+analytics layer uses that warehouse to answer a commercial question: **which
+marketplace partners should the business protect, grow or investigate?**
+
+[Partner insight memo](docs/PARTNER_INSIGHT_MEMO.md) ·
+[Metric dictionary](docs/PARTNER_METRIC_DICTIONARY.md) ·
+[dbt models](dbt/retail_elt/models/analytics)
 
 ```bash
 git clone <this-repo>
@@ -15,13 +23,6 @@ docker compose up --build
 Then open the Airflow UI at `http://localhost:8080` (user/pass: `admin`/`admin`)
 and trigger the `retail_elt_pipeline` DAG.
 
-This is the fifth project in a portfolio that otherwise proves "I can model
-data and build on top of a warehouse" (a CV classifier, an NL2SQL layer, a
-fraud model, an A/B testing tool). This one proves a different skill: **I can
-build the pipeline that fills the warehouse in the first place.** It reuses
-the Olist retail dataset from the delivery-risk and NL2SQL projects, but the
-point of this repo is the pipeline, not the analysis on top of it.
-
 ## What it does
 
 Raw Olist exports were split into a simulated monthly landing zone (see
@@ -32,12 +33,16 @@ exactly like a real system dropping daily/monthly extracts. From there:
    tables in DuckDB — idempotently, so re-running a month never duplicates
    rows.
 2. **dbt** cleans each raw table into a staging model (types cast, names
-   standardized, nulls handled explicitly), then rebuilds a star schema
+   standardised, nulls handled explicitly), then rebuilds a star schema
    (`fact_order_items`, `fact_payments`, `fact_reviews`, `dim_customers`,
    `dim_products`, `dim_sellers`, `dim_date`) on top of staging.
-3. **dbt tests** (51 of them — schema tests plus two custom singular tests)
-   run as part of the same `dbt build`, which stops on the first failing
-   test. A bad row anywhere fails the DAG run, not just a log line.
+3. **Partner analytics models** convert item-level records into safe
+   seller-order, seller-month and lifetime scorecard grains without duplicating
+   revenue on multi-seller orders.
+4. **dbt tests** run as part of the same `dbt build`, which stops on the first
+   failing test. A bad row anywhere fails the DAG run, not just a log line.
+5. **Dashboard exports** publish KPI, monthly-performance and partner-scorecard
+   CSVs for Power BI or another presentation layer.
 
 ## Architecture
 
@@ -54,7 +59,10 @@ staging.stg_*
         ▼  dbt build — mart models (star schema)
 marts.{fact_order_items, fact_payments, fact_reviews, dim_customers, dim_products, dim_sellers, dim_date}
         │
-        ▼  dbt build — schema + singular tests (51 tests, fails the run on any failure)
+        ▼  partner analytics — order grain -> monthly performance -> lifetime scorecard
+analytics.{partner_order_performance, partner_monthly_performance, partner_scorecard, partner_kpi_summary}
+        │
+        ▼  dbt build — schema + singular tests (fails the run on any failure)
 ```
 
 The dbt-generated lineage graph makes this same flow visible without reading
@@ -64,6 +72,28 @@ any code:
 
 *(green = sources, blue = models, generated with `dbt docs generate` /
 `dbt docs serve`.)*
+
+## Partner-performance analysis
+
+The analytics layer deliberately starts at one seller-order relationship. One
+marketplace order can contain items from several sellers, so joining order-level
+reviews or delivery outcomes directly to items would duplicate those measures.
+The intermediate grain makes that modelling decision explicit.
+
+| Model | Grain | Purpose |
+| --- | --- | --- |
+| `partner_order_performance` | Seller x order | Reconciled revenue, freight, delivery and review measures |
+| `partner_monthly_performance` | Seller x month | Trends, service rates and month-over-month revenue growth |
+| `partner_scorecard` | Seller | Lifetime commercial and operational view with explainable segments |
+| `partner_kpi_summary` | Portfolio | One-row executive KPI source for dashboard cards |
+
+A reference run over the complete public dataset found that the top 10% of
+partners generated 67.56% of item revenue, while late seller-orders averaged a
+2.57 review score versus 4.27 for on-time seller-orders. The
+[insight memo](docs/PARTNER_INSIGHT_MEMO.md) turns these findings into a proposed
+partner-management decision and records the limitations. The
+[metric dictionary](docs/PARTNER_METRIC_DICTIONARY.md) defines every denominator
+and caveat so the dashboard cannot silently change the meaning of a KPI.
 
 ## Engineering decisions
 
@@ -129,11 +159,14 @@ red-lining the pipeline over data it can't change.
 
 ## Data quality
 
-66 dbt checks run on every `dbt build` (51 data tests + models): `unique`
-and `not_null` on every dimension and fact primary key, `relationships`
-tests from every fact table back to its dimensions, and two custom singular
-tests (`assert_no_negative_payment_values`, `assert_no_review_before_order`).
-A clean run against the full dataset:
+The current build runs 74 data tests. It checks `unique` and `not_null` constraints on dimension, fact and
+analytics grains; relationships from facts and scorecards back to dimensions;
+rate bounds; non-negative payments; known upstream timestamp debt; and exact
+revenue reconciliation between item facts and the partner layer. The export script
+was also validated against the fixture warehouse to confirm that each expected
+dashboard dataset is generated and non-empty.
+
+A clean run against the original warehouse layer completed successfully:
 
 ```
 Finished running 8 view models, 7 table models, 51 data tests in 1.06s.
@@ -141,7 +174,8 @@ Completed successfully.
 Done. PASS=66 WARN=0 ERROR=0 SKIP=0 TOTAL=66
 ```
 
-See the injected-bad-row output above for what a real failure looks like.
+The current CI run reports the expanded test count. See the injected-bad-row
+output above for what a real failure looks like.
 
 ## Tech stack
 
@@ -163,9 +197,14 @@ data/partition_landing_zone.py  Regenerates the simulated landing zone from raw 
 data/README.md                  How to fetch the source data and rebuild the landing zone
 dbt/retail_elt/
   models/staging/               One-to-one cleanup of each raw table
-  models/marts/                 Star schema: 3 facts, 3 dims, 1 date dim
+  models/marts/                 Star schema: 3 facts, 3 dimensions, 1 date dimension
+  models/analytics/             Partner order, monthly, scorecard and KPI models
   tests/                        Custom singular tests
   profiles/profiles.yml         DuckDB connection (dev + ci targets)
+docs/PARTNER_METRIC_DICTIONARY.md  KPI definitions, denominators and caveats
+docs/PARTNER_INSIGHT_MEMO.md       Decision-focused analysis for stakeholders
+scripts/export_partner_dashboard.py  Dashboard-ready CSV export
+analysis/partner_insight_queries.sql  Reproducible stakeholder analysis queries
 tests/fixtures/                 Small hand-built landing zone + seed data for CI
 tests/test_idempotency.py       Proves rerunning a partition doesn't duplicate rows
 docker-compose.yml              Postgres + Airflow webserver/scheduler, dbt runs inside the Airflow image
@@ -194,18 +233,25 @@ cd dbt/retail_elt && DBT_PROFILES_DIR=../profiles DUCKDB_PATH=../../data/warehou
 # 5. See the quality gate catch a real problem
 python3 scripts/inject_bad_row.py --landing data/landing
 # reload payments + dbt build again -> assert_no_negative_payment_values fails
+
+# 6. Export the partner data model for Power BI or another dashboard tool
+python scripts/export_partner_dashboard.py \
+  --warehouse data/warehouse/retail.duckdb \
+  --output-dir data/dashboard_exports
 ```
 
 ## What I would do next
 
-- Swap DuckDB for a cloud warehouse (Snowflake/BigQuery) behind the same dbt
-  models, to show the same lineage running against a multi-tenant target.
-- Add a streaming source (e.g. simulated order events via Kafka) alongside
-  the batch landing zone, so the DAG handles both cadences.
-- Replace the DELETE+INSERT idempotency pattern with dbt incremental
-  models using `unique_key`, to compare the two approaches directly.
-- Add Airflow SLAs / alerting on the `dbt_build` task so a failure page
-  someone instead of just failing the UI run.
+- Connect the dashboard exports to Power BI and build an executive overview,
+  partner drill-down and service-quality page from the governed metrics.
+- Add partner-category and route/carrier dimensions before attempting delivery
+  root-cause attribution.
+- Add intervention history so partner improvements can be evaluated against a
+  credible comparison group rather than a before-and-after chart.
+- Swap DuckDB for a cloud warehouse behind the same dbt models and introduce
+  incremental models for larger daily loads.
+- Add Airflow alerting so a quality failure pages an owner instead of only
+  failing in the UI.
 
 ## Data
 

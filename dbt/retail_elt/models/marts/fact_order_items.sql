@@ -14,7 +14,25 @@ select
     oi.seller_id,
     o.customer_id,
     o.order_purchase_date as order_date,
+    o.order_purchase_at,
     o.order_status,
+    o.order_delivered_customer_at,
+    o.order_estimated_delivery_at,
+    case when o.order_status = 'delivered' then 1 else 0 end as is_delivered,
+    case when o.order_status in ('canceled', 'unavailable') then 1 else 0 end as is_cancelled,
+    case
+        when o.order_status = 'delivered'
+          and o.order_delivered_customer_at is not null
+          and o.order_estimated_delivery_at is not null
+        then case when o.order_delivered_customer_at > o.order_estimated_delivery_at then 1 else 0 end
+        else null
+    end as is_late,
+    case
+        when o.order_status = 'delivered'
+          and o.order_delivered_customer_at is not null
+        then datediff('day', o.order_purchase_at, o.order_delivered_customer_at)
+        else null
+    end as delivery_days,
     oi.price,
     oi.freight_value
 from order_items oi

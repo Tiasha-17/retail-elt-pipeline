@@ -1,0 +1,83 @@
+version: 2
+
+models:
+  - name: partner_order_performance
+    description: >
+      One row per seller-order relationship. This is the safe aggregation
+      grain for partner KPIs when one marketplace order can contain items
+      from more than one seller.
+    columns:
+      - name: partner_order_key
+        tests:
+          - unique
+          - not_null
+      - name: seller_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_sellers')
+              field: seller_id
+      - name: order_id
+        tests:
+          - not_null
+      - name: item_revenue
+        tests:
+          - not_null
+
+  - name: partner_monthly_performance
+    description: >
+      Monthly seller scorecard with commercial, delivery and customer
+      experience measures plus month-over-month revenue growth.
+    columns:
+      - name: partner_month_key
+        tests:
+          - unique
+          - not_null
+      - name: seller_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_sellers')
+              field: seller_id
+      - name: order_month
+        tests:
+          - not_null
+      - name: item_revenue
+        tests:
+          - not_null
+      - name: order_count
+        tests:
+          - not_null
+
+  - name: partner_scorecard
+    description: >
+      Lifetime seller scorecard segmented into Strategic, At risk, Growth
+      opportunity and Monitor groups using portfolio-relative benchmarks.
+    columns:
+      - name: seller_id
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('dim_sellers')
+              field: seller_id
+      - name: partner_segment
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Strategic', 'At risk', 'Growth opportunity', 'Monitor']
+
+  - name: partner_kpi_summary
+    description: >
+      One-row executive KPI summary for dashboard cards and stakeholder
+      reporting.
+    columns:
+      - name: partner_count
+        tests:
+          - not_null
+      - name: partner_order_count
+        tests:
+          - not_null
+      - name: item_revenue
+        tests:
+          - not_null
